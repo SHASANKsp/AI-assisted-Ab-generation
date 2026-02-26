@@ -1,0 +1,28 @@
+Paper	Priority	Year	Remark
+Revolutionizing oncology: the role of Artificial Intelligence (AI) as an antibody design, and optimization tools	1	2025	
+A new era of antibody discovery: an in-depth review of AI-driven approaches	1	2024	In this review, we scrutinize the plethora of AI-driven methodologies that have been deployed over the past 4 years for modeling antibody structures, predicting antibody–antigen interactions, optimizing antibody affinity, and generating novel antibody candidates.
+Antibody design using deep learning: from sequence and structure design to affinity maturation	1	2024	
+The rise of big data: deep sequencing‑driven computational methods are transforming the landscape of synthetic antibody design	1	2024	
+Unlocking de novo antibody design with generative artificial intelligence	model	2024	
+A comprehensive overview of recent advances in generative models for antibodies	1	2024	
+Generative artificial intelligence for de novo protein design	1	2024	detail on methods used for Ab design
+Leveraging Artificial Intelligence to Expedite Antibody Design and Enhance Antibody–Antigen Interactions	1	2024	
+Recent Advances in the Development of Monoclonal Antibodies and Next-Generation Antibodies	0	2023	
+AI Models for Protein Design are Driving Antibody Engineering	0	2023	Summary of the protein models turned into Ab design tools
+Computational and artificial intelligence-based methods for antibody development	1	2023	
+AbGAN-LMG: Improving antibody optimization ability of generative adversarial network through large language model	model	2023	
+De novo generation of antibody CDRH3 with a pre-trained generative large language model	model	2023	
+Advances in computational structure-based antibody design	0	2022	
+TransDFL: Identification of Disordered Flexible Linkers in Proteins by Transfer Learning	model	2022	
+The RESP AI model accelerates the identification of tight-binding antibodies	1	2022	
+Antibody engineering and its therapeutic applications	0	2021	
+Predicting Immunogenicity Risk in Biopharmaceuticals	1	2021	
+The language of proteins: NLP, machine learning & protein sequences	1	2021	
+Modified Therapeutic Antibodies: Improving Efficacy	0	2020	
+Considerations for the Design of Antibody-Based Therapeutics	0	2020	
+Engineering Stability, Viscosity, and Immunogenicity of Antibodies by Computational Design	1	2020	Ab property prediction - model/database/methords
+Engineering antibody therapeutics	0	2016	Theoritical background
+Antibody Aggregation: Insights from Sequence  and Structure	0	2016	
+Advances in Antibody Design	1	2016	
+Sequencing the functional antibody repertoire —diagnostic and therapeutic discovery	-1	2014	
+Research and development of next generation of antibody-based therapeutics	0	2010	
