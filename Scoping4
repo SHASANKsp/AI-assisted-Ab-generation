@@ -1,0 +1,23 @@
+Source	Link	Ref
+Kaggle dataset	Peptides Predictions	https://www.ncbi.nlm.nih.gov/pmc/articles/PMC3823795/
+AbBiBench	AbBibench/Antibody_Binding_Benchmark_Dataset · Datasets at Hugging Face	We introduce AbBiBench (Antibody Binding Benchmarking), a benchmarking framework for optimizing antibody binding affinity. This dataset contains the sequences of mutants, experimentally measured affinity values, and the structures of antigen-antibody complexes.
+Hugging face	apoha/expanded_antibody_vibe · Datasets at Hugging Face	Hugging face
+Hugging face	bbdinosorry/antibody_rbd_sft · Datasets at Hugging Face	Hugging face
+Hugging face	bbdinosorry/antibody_rbd_orpo · Datasets at Hugging Face	Hugging face
+MHCBN	http://crdd.osdd.net/raghava/mhcbn/	Binding, non-binding and T cell epitopes
+AntiJen	http://www.ddg-pharmfac.net/antijen/AntiJen/ antijenhomepage.htm (accessed on 27 February 2021) 	Data for thermodynamics and kinetics. Functional and cellular data in the context of vaccinology and immunology.
+IEDB (Immune Epitope Database)	www.iedb.org	B and T cell epitopes which are characterized experimentally, as well as major histocompatibility complex (MHC) binding data and MHC ligand elution experimental data.
+IMGT (International ImMunoGeneTics information system)	http://www.imgt.org/	Immunoglobulins, T cell receptors, MHC proteins of human and other vertebrate species
+BCIPEP	http://crdd.osdd.net/raghava/bcipep/	B cell epitope database with 3031 peptide entries.
+SYFPEITHI	http://www.syfpeithi.de/	Contains more than 7000 peptide sequences known to bind class I and class II MHC molecules
+OAS	OAS: Observed Antibody Space	OAS
+Hugging face	alchemab/her2-binding-prediction · Datasets at Hugging Face	Hugging face
+Hugging face	alchemab/il6-binding-prediction · Datasets at Hugging Face	Hugging face
+Hugging face	alchemab/sarscov2-binding-prediction · Datasets at Hugging Face	Hugging face
+AbDb		
+Absolut!		
+AntiBodies Chemically Defined Database		
+CoV-AbDab (subset of SAbDab)		
+iReceptor		
+SAbDab		
+AbSet: A Standardized Data Set of Antibody Structures for Machine Learning Applications | Journal of Chemical Information and Modeling		
