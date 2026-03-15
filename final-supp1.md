@@ -1,455 +1,1894 @@
+# Pipeline 1 — Epitope-Targeted De Novo Antibody Design
 
-# The Emerging Stack for AI-Driven Antibody Design
+### RFdiffusion → ProteinMPNN → IgFold → BioPhi
 
-### From generative language models to full end-to-end discovery pipelines
+## Scientific motivation
 
-Therapeutic antibodies dominate modern biologics. Over a hundred antibody drugs are approved globally and they treat diseases ranging from cancer to autoimmune disorders. The challenge is that discovering a successful antibody is still slow, expensive, and experimentally intensive. ([PMC][1])
+This pipeline embodies the most ambitious goal in computational antibody engineering: **designing a functional antibody from scratch that binds a specific antigen epitope**. Historically, this task required immunization or extremely large library screens. Those experimental approaches rely on the immune system’s natural evolutionary process—generating billions of B-cell variants and selecting those that bind the target antigen.
 
-Traditional antibody discovery relies on immunization, phage display, or hybridoma screening. These methods work, but they explore only a tiny fraction of the possible antibody sequence space. The theoretical space of antibody sequences is astronomically large, far beyond what laboratory screening alone can search.
+AI-driven design attempts to replace that enormous biological search with **guided computational generation**.
 
-Artificial intelligence is now beginning to change this landscape.
+Antibody binding is dominated by the six **complementarity-determining regions (CDRs)**, which form the antigen-binding site (paratope). Among these, the CDR-H3 loop contributes the largest share of binding specificity. The geometric arrangement of these loops determines whether the antibody can physically complement the antigen surface.
 
-In the last five years, deep learning has produced a diverse ecosystem of computational tools capable of generating antibody sequences, predicting structures, modeling antigen binding, and evaluating developability properties. These tools individually solve pieces of the antibody engineering puzzle. The real opportunity lies in **connecting them into automated pipelines** that move from antigen target to therapeutic candidate entirely in silico.
+The key idea behind Pipeline 1 is therefore simple in principle but difficult in practice:
 
-Such pipelines combine generative sequence models, structure predictors, diffusion-based protein design methods, docking algorithms, and developability predictors. When assembled correctly, they enable the design, evaluation, and optimization of antibodies in a continuous computational workflow.
+**Design a protein structure whose CDR loops geometrically complement a chosen antigen epitope.**
 
-This article presents a comprehensive overview of that emerging stack and describes **twenty detailed AI pipelines for antibody discovery**, illustrating how modern tools can be chained together to perform full computational antibody design.
+Once that structure exists, sequence design algorithms can assign amino acids that stabilize it.
 
----
+This pipeline therefore separates antibody design into **three major computational problems**:
 
-# The AI Toolbox for Antibody Design
-
-Before diving into pipelines, it helps to understand the categories of models involved. Modern antibody AI systems generally fall into four major classes:
-
-1. **Sequence generation models**
-2. **Structure prediction models**
-3. **Antigen-binding design models**
-4. **Developability and humanization models**
-
-Each category solves a different part of the antibody engineering problem.
+1. **Generate a backbone structure compatible with antigen binding**
+2. **Design a sequence that folds into that backbone**
+3. **Evaluate structural stability and developability**
 
 ---
 
-# Sequence Generation Models
+## Step 1 — RFdiffusion: generating antibody backbones
 
-Antibodies are defined primarily by their amino acid sequence, especially the six complementarity determining regions (CDRs) that form the antigen-binding site. Generating novel sequences that resemble functional antibodies is therefore the first step in computational design.
+The pipeline begins with **RFdiffusion**, a diffusion-based generative model derived from the RoseTTAFold architecture.
 
-Recent advances in protein language models have enabled systems that learn statistical patterns from hundreds of millions of antibody sequences.
+Diffusion models generate structures by reversing a noise process. During training, real protein structures are gradually corrupted by noise. The neural network learns to reverse this process by predicting how to denoise the structure step by step.
 
-### AB-Gen
+When generating new proteins, the model starts with random noise and progressively converts it into a plausible protein backbone.
 
-AB-Gen is a transformer model trained on tens of millions of heavy-chain CDR3 sequences from the Observed Antibody Space database. It uses reinforcement learning to bias generation toward sequences with desirable properties such as improved solubility or reduced immunogenicity.
+In the antibody context, the diffusion process is **conditioned on antigen geometry**. The model receives structural information describing the epitope surface and is trained to generate protein backbones whose CDR loops orient toward that surface.
 
-The model focuses specifically on the CDRH3 loop, the most diverse and functionally important region of antibodies.
+This allows RFdiffusion to produce antibody structures that complement antigen surfaces at atomic resolution. Experiments have demonstrated that RFdiffusion can design antibodies targeting viral proteins, toxins, and other biological targets with extremely accurate binding geometries. ([Nature][1])
 
-### AntiBERTy
+Importantly, RFdiffusion generates only **backbone coordinates**, not sequences. The output is therefore a geometric template for the antibody variable region.
 
-AntiBERTy is a large protein language model trained on over 500 million antibody sequences. Rather than generating sequences directly, it produces high-dimensional embeddings representing antibody sequence features.
+The reason for separating backbone and sequence generation is scientific: **protein structure constrains sequence but not vice versa**. A given backbone geometry restricts which amino acids can occupy each position due to steric and energetic constraints.
 
-These embeddings capture patterns related to affinity maturation and binding specificity, making the model useful for clustering, ranking, and feature extraction.
-
-### IgBERT and IgT5
-
-These models are massive transformer architectures trained on billions of antibody sequences. Their size allows them to model the statistical landscape of antibody repertoires with high fidelity. They can predict sequence recovery, expression levels, and sometimes binding potential.
-
-### IgLM
-
-IgLM is an infilling language model that can complete missing regions of an antibody sequence. If a framework sequence is provided with masked CDR loops, the model generates plausible loop sequences consistent with the rest of the antibody.
-
-### IgCraft
-
-IgCraft represents a newer generation of antibody design models using Bayesian flow networks. It supports multiple design tasks simultaneously, including sequence generation, CDR grafting, and inverse folding.
-
-### Diffusion models for antibody generation
-
-Another powerful class of models uses **diffusion processes**. These models learn to generate protein structures by gradually denoising random noise into physically plausible structures.
-
-Diffusion models are particularly useful for antibody design because they can jointly generate sequence and structure.
-
-Examples include:
-
-* DiffAb
-* AbDiffuser
-* AbX
-
-Diffusion-based approaches have recently demonstrated the ability to generate antibody binding loops directly conditioned on antigen structure.
+Thus, the pipeline next performs inverse folding.
 
 ---
 
-# Structure Prediction Models
+## Step 2 — ProteinMPNN: sequence design via inverse folding
 
-Once sequences are generated, the next step is predicting the three-dimensional structure of the antibody.
+ProteinMPNN is a graph neural network trained to solve the **inverse protein folding problem**.
 
-Structural information is critical because antibody binding depends on precise spatial geometry between paratope and epitope.
+In classical protein folding, we attempt to predict structure from sequence. In inverse folding, the input is the **structure**, and the task is to determine which amino acid sequence would stabilize that structure.
 
-### IgFold
+ProteinMPNN treats the protein backbone as a graph where residues are nodes and spatial relationships are edges. Message-passing neural networks propagate information across the structure, allowing the model to choose residues that stabilize the overall fold.
 
-IgFold is one of the fastest antibody structure predictors available. It combines embeddings from antibody language models with SE(3)-equivariant graph neural networks to predict Fv structures in seconds.
+In the context of antibody design, ProteinMPNN performs two important tasks:
 
-### ABodyBuilder3
+• stabilizing the CDR loops generated by RFdiffusion
+• ensuring that the framework regions resemble natural antibody structures
 
-ABodyBuilder3 builds on AlphaFold-style architectures and integrates language-model embeddings to improve CDR loop prediction accuracy.
+Inverse folding is critical because diffusion-generated backbones lack side chains. Without sequence assignment, the structure cannot be expressed as a protein.
 
-Both tools provide high-quality structural predictions needed for downstream binding analysis.
-
----
-
-# Antigen-Specific Antibody Design
-
-Structure prediction alone does not guarantee antigen binding. For targeted design, models must consider the antigen.
-
-Several emerging models incorporate antigen structure directly.
-
-### DiffAb
-
-DiffAb is a diffusion-based model that generates CDR sequences and structures conditioned on antigen structure.
-
-### AbDockGen
-
-AbDockGen uses graph neural networks to generate antibody paratopes that dock to antigen epitopes.
-
-### RFdiffusion
-
-RFdiffusion is currently one of the most powerful generative protein design methods. It generates entirely new protein structures that bind specific targets.
-
-The method starts from random noise and iteratively refines structures that complement the antigen surface. ([bakerlab.org][2])
-
-Recent work demonstrated that RFdiffusion can generate antibodies that bind target epitopes with near atomic precision. ([PMC][3])
+Modern pipelines nearly always combine **RFdiffusion + ProteinMPNN** because the two methods complement each other: diffusion generates geometry, while inverse folding generates sequence. ([Nature][2])
 
 ---
 
-# Developability and Humanization
+## Step 3 — IgFold: structure validation
 
-Binding affinity alone does not make a therapeutic antibody.
+Even if a sequence is predicted to stabilize a backbone, it is essential to verify that the sequence actually folds into the desired structure.
 
-Drug candidates must also be:
+This step is performed by **IgFold**, a deep learning model specialized for antibody structure prediction.
 
-* stable
-* soluble
-* non-immunogenic
-* manufacturable
+IgFold combines embeddings from antibody language models with SE(3)-equivariant neural networks to predict antibody variable region structures quickly and accurately.
 
-### BioPhi
+In the pipeline, IgFold acts as a **consistency check**. If the predicted structure deviates significantly from the diffusion-generated backbone, the candidate antibody is rejected.
 
-BioPhi provides tools for antibody humanization and humanness scoring.
-
-Its Sapiens model suggests mutations that transform non-human antibodies into human-like sequences while preserving structure.
-
-Other machine learning models can predict:
-
-* aggregation propensity
-* expression yield
-* thermal stability
-
-These filters ensure candidates are suitable for clinical development.
+This step is analogous to folding validation in classical protein design pipelines.
 
 ---
 
-# The Need for Integrated Pipelines
+## Step 4 — BioPhi: developability filtering
 
-Individually, each tool performs a specialized task. But antibody discovery requires **multiple stages**:
+Finally, candidate antibodies must be evaluated for **developability**.
 
-1. sequence generation
-2. structure prediction
-3. antigen binding evaluation
-4. developability screening
-5. optimization
+Even if an antibody binds its target strongly, it may fail as a drug due to:
 
-AI pipelines connect these tools into workflows that perform these steps sequentially.
+• immunogenicity
+• aggregation
+• poor stability
+• manufacturing challenges
 
-Below are **twenty representative pipelines**, illustrating different design strategies.
+BioPhi addresses this problem by comparing candidate sequences to large human antibody repertoires.
+
+The tool’s Sapiens model predicts mutations that increase “humanness” while preserving structural integrity.
+
+This step ensures that AI-designed antibodies resemble natural antibodies and therefore have a higher chance of being tolerated by the immune system.
 
 ---
 
-# Pipeline 1 — Epitope-Targeted Antibody Design
+## Why this pipeline works scientifically
 
-**Workflow**
+Pipeline 1 mirrors the **physical and evolutionary logic of antibody function**.
 
-RFdiffusion → ProteinMPNN → IgFold → BioPhi
+Antibody binding requires:
 
-This pipeline begins with the structure of an antigen epitope.
+1. a compatible binding geometry
+2. a stable sequence
+3. a correctly folded structure
+4. acceptable drug-like properties
 
-RFdiffusion generates antibody backbone structures that complement the epitope surface. Because diffusion models operate directly in structural space, they can produce entirely new antibody frameworks that fit the antigen geometry.
+Each stage of the pipeline corresponds to one of these constraints.
 
-Next, ProteinMPNN designs sequences predicted to fold into those structures. ProteinMPNN performs inverse folding: it determines which amino acids stabilize the backbone geometry.
+This approach has already been validated experimentally. In RFdiffusion studies, antibodies designed entirely computationally were expressed and experimentally shown to bind target epitopes with atomic-level accuracy confirmed by cryo-electron microscopy. ([PubMed][3])
 
-IgFold predicts the final antibody structure and verifies that the sequence folds correctly.
+---
 
-Finally, BioPhi humanizes the antibody to ensure it resembles natural human antibodies.
+## Key references for Pipeline 1
 
-**Strengths**
+Primary computational methods
 
-Precise geometric targeting.
+• Bennett et al., *Atomically accurate de novo design of antibodies with RFdiffusion*, Nature 2026. ([Nature][1])
+• Dauparas et al., *ProteinMPNN: sequence design on protein backbones*, Science 2022.
+• Ruffolo et al., *IgFold: deep learning antibody structure prediction*, Science Advances 2022.
 
-**Weakness**
+Scientific foundations
 
-Requires accurate antigen structure.
+• Chungyoun et al., *AI-driven computational methods for antibody design*, 2023. ([PMC][4])
+• Baker Lab review of RFdiffusion antibody design. ([Baker Lab][5])
 
 ---
 
 # Pipeline 2 — Joint Sequence-Structure Antibody Generation
 
-**Workflow**
+### DiffAb → IgFold → AlphaFold-Multimer
 
-DiffAb → IgFold → AlphaFold-Multimer
+## Scientific motivation
 
-DiffAb generates CDR loops conditioned on the antigen structure.
+Pipeline 1 separates structure generation and sequence generation. While this works well in many cases, real proteins exhibit **strong coupling between sequence and structure**.
 
-These loops are embedded into antibody frameworks and modeled with IgFold.
+Certain sequences favor certain structures, and certain structures only exist for specific sequences.
 
-AlphaFold-Multimer then predicts the antibody-antigen complex and evaluates the binding interface.
+Pipeline 2 attempts to capture this coupling using **DiffAb**, a diffusion model that generates antibody sequences and structures simultaneously.
 
-This pipeline performs **co-design of sequence and structure simultaneously**.
+This pipeline is based on a different philosophy:
 
----
-
-# Pipeline 3 — CDR Loop Diversification
-
-**Workflow**
-
-AbDiffuser → ProteinMPNN → IgFold
-
-Starting from a known antibody scaffold, AbDiffuser generates new CDR loops compatible with the antigen.
-
-ProteinMPNN assigns sequences to these loops.
-
-IgFold predicts structures and filters unstable variants.
-
-This approach resembles computational affinity maturation.
+Instead of generating structure first and sequence second, **generate both together** in a unified probabilistic model.
 
 ---
 
-# Pipeline 4 — Structure-Guided Redesign
+## Step 1 — DiffAb: joint sequence-structure diffusion
 
-**Workflow**
+DiffAb is a generative model specifically designed for antibody design.
 
-RFdiffusion → AntiFold → IgFold
+It uses diffusion probabilistic models combined with **equivariant neural networks** to generate antibody CDR loops conditioned on antigen structure.
 
-RFdiffusion modifies the backbone geometry of an antibody while maintaining antigen contacts.
+The model operates on three types of variables simultaneously:
 
-AntiFold then redesigns sequences to stabilize the new backbone.
+• amino acid identity
+• residue position
+• residue orientation
 
-IgFold validates the structural integrity.
+During training, both sequences and structures are corrupted with noise. The neural network learns to reverse this process and recover the original antibody–antigen complexes.
+
+At generation time, the model starts from random noise and gradually reconstructs a new antibody binding site compatible with the antigen.
+
+This approach has several advantages over sequential pipelines.
+
+First, it captures the **coupling between sequence and structure**. Certain residues prefer particular backbone conformations, and the model learns these correlations.
+
+Second, the diffusion process naturally explores **multiple candidate binding geometries**, enabling diversity in antibody designs.
+
+DiffAb was the first deep learning model capable of explicitly generating antibodies targeting specific antigens. ([proceedings.neurips.cc][6])
+
+---
+
+## Step 2 — IgFold: structural refinement
+
+Although DiffAb generates both sequence and structure, the generated models can still contain geometric inaccuracies.
+
+IgFold is therefore used to refine the antibody structure.
+
+The reason this step is necessary lies in the difference between **generative models and predictive models**.
+
+Generative models aim to sample from a distribution of possible structures, which can introduce minor structural inconsistencies.
+
+Predictive models such as IgFold are optimized to produce the most accurate structure given a sequence.
+
+Combining the two approaches improves structural fidelity.
+
+---
+
+## Step 3 — AlphaFold-Multimer: binding validation
+
+The final stage evaluates whether the designed antibody actually binds the antigen.
+
+AlphaFold-Multimer predicts protein complexes and estimates interaction interfaces.
+
+In this pipeline, AlphaFold-Multimer predicts the antibody–antigen complex structure and provides confidence scores.
+
+This step approximates the **thermodynamics of binding**.
+
+Binding affinity arises from multiple molecular interactions:
+
+• hydrogen bonds
+• electrostatic interactions
+• hydrophobic contacts
+• shape complementarity
+
+Complex prediction models approximate these interactions computationally.
+
+Candidates predicted to form stable complexes are prioritized for experimental testing.
+
+---
+
+## Why this pipeline is scientifically powerful
+
+Pipeline 2 represents a shift toward **end-to-end generative antibody design**.
+
+Rather than building antibodies step-by-step, the model learns the full joint distribution of antibody sequences and structures.
+
+This approach is closer to how natural antibodies evolve.
+
+During immune evolution, mutations occur in both sequence and structure simultaneously, with natural selection favoring variants that bind antigens effectively.
+
+Diffusion models attempt to replicate that evolutionary process in a learned probabilistic framework.
+
+---
+
+## Key references for Pipeline 2
+
+Primary methods
+
+• Luo et al., *Antigen-specific antibody design with diffusion generative models*, NeurIPS 2022. ([proceedings.neurips.cc][7])
+• Ruffolo et al., *IgFold: deep learning antibody structure prediction*, 2022.
+
+Scientific background
+
+• Chungyoun et al., *AI-driven computational methods for antibody design*, 2023. ([PMC][4])
+• Villegas-Morcillo et al., diffusion models for antibody design. ([link.aps.org][8])
+
+
+
+[1]: https://www.nature.com/articles/s41586-025-09721-5?utm_source=chatgpt.com "Atomically accurate de novo design of antibodies with RFdiffusion"
+[2]: https://www.nature.com/articles/s41586-025-09429-6?utm_source=chatgpt.com "One-shot design of functional protein binders with BindCraft"
+[3]: https://pubmed.ncbi.nlm.nih.gov/41193805/?utm_source=chatgpt.com "Atomically accurate de novo design of antibodies with RFdiffusion"
+[4]: https://pmc.ncbi.nlm.nih.gov/articles/PMC10361400/?utm_source=chatgpt.com "AI Models for Protein Design are Driving Antibody Engineering"
+[5]: https://www.bakerlab.org/2025/02/28/designing-antibodies-with-rfdiffusion/?utm_source=chatgpt.com "Designing antibodies with RFdiffusion - Baker Lab"
+[6]: https://proceedings.neurips.cc/paper_files/paper/2022/hash/3fa7d76a0dc1179f1e98d1bc62403756-Abstract-Conference.html?utm_source=chatgpt.com "Antigen-Specific Antibody Design and Optimization with ..."
+[7]: https://proceedings.neurips.cc/paper_files/paper/2022/file/3fa7d76a0dc1179f1e98d1bc62403756-Paper-Conference.pdf?utm_source=chatgpt.com "Antigen-Specific Antibody Design and Optimization with ..."
+[8]: https://link.aps.org/doi/10.1103/PRXLife.2.033012?utm_source=chatgpt.com "Guiding Diffusion Models for Antibody Sequence and ..."
+
+
+# Pipeline 3 — CDR Diversification Pipeline
+
+**AbDiffuser / AbX / Diffusion models → ProteinMPNN → IgFold**
+
+## Scientific rationale
+
+The central scientific insight behind this pipeline comes from immunology: **most antibody binding diversity arises from mutations in the complementarity-determining regions (CDRs)** rather than the framework regions. These loops form the antigen-binding interface and determine both specificity and affinity.
+
+Among the six loops (H1–H3, L1–L3), **CDR-H3 is the most diverse** and often contributes the majority of binding contacts. Natural antibody evolution therefore focuses mutations in these regions during **affinity maturation in germinal centers**, where B-cells accumulate somatic mutations that improve antigen binding.
+
+The computational analogue of this biological process is **loop diversification**.
+
+Instead of designing a completely new antibody, the pipeline begins with an existing scaffold and explores alternative CDR conformations that may improve binding.
+
+This approach has two major advantages:
+
+1. **Structural stability is preserved** because the antibody framework remains fixed.
+2. **Search space is dramatically reduced**, allowing algorithms to focus on functionally relevant residues.
+
+---
+
+## Step 1 — Diffusion-based CDR generation
+
+The pipeline begins with a diffusion model specialized for antibody loop generation. Models such as **AbDiffuser, AbX, and IgDiff** generate CDR loop structures conditioned on the surrounding antibody framework and sometimes the antigen.
+
+Diffusion models operate by learning to reverse a noise process applied to training data. In the case of antibody loops, the model learns the distribution of loop conformations observed in experimentally solved antibody structures.
+
+During generation, the model begins with random noise and iteratively reconstructs loop geometries consistent with antibody structural constraints.
+
+These models are typically **SE(3)-equivariant**, meaning their predictions are invariant to rotation and translation of the molecule in 3-D space. This property is critical because protein structures have no absolute orientation.
+
+Recent work has shown that diffusion models can generate CDR loops with atomic-level accuracy while maintaining realistic backbone dihedral angle distributions. ([arXiv][1])
+
+Some models go further and incorporate **physical and evolutionary constraints**, such as steric clashes or residue conservation patterns. ([researchgate.net][2])
+
+---
+
+## Step 2 — Sequence assignment via ProteinMPNN
+
+Once a candidate loop geometry is generated, the next challenge is assigning amino acid residues that stabilize that conformation.
+
+This is accomplished using **ProteinMPNN**, a graph neural network trained on thousands of experimentally solved protein structures.
+
+The model treats residues as nodes in a graph connected by spatial edges representing proximity. Message-passing allows the network to evaluate which amino acids best stabilize the local environment.
+
+This step solves the **inverse protein folding problem**: determining sequence from structure.
+
+For antibodies, this is particularly important because CDR loops often contain unusual conformations requiring specific residues (e.g., glycine or proline) to stabilize tight turns.
+
+---
+
+## Step 3 — Structural validation with IgFold
+
+The final step validates the structural stability of the design.
+
+IgFold predicts antibody structures from sequence using deep learning models trained on antibody structural databases.
+
+If the predicted structure matches the designed geometry, the candidate is considered structurally stable.
+
+If not, the design is rejected.
+
+---
+
+## Biological interpretation
+
+This pipeline mirrors the natural **affinity maturation process**.
+
+In the immune system:
+
+1. Antibody frameworks remain largely unchanged.
+2. CDR loops accumulate mutations.
+3. B-cells expressing higher-affinity antibodies are selected.
+
+The computational pipeline performs the same process but replaces biological selection with structural prediction and energy evaluation.
+
+---
+
+## Advantages of the pipeline
+
+• Maintains antibody structural stability
+• Efficiently explores binding-relevant sequence space
+• Mimics natural immune evolution
+
+---
+
+## Limitations
+
+• Cannot discover completely novel antibody frameworks
+• Requires a starting antibody scaffold
+• Limited by available structural training data
+
+---
+
+## References
+
+Scientific background
+
+• Antibody affinity maturation and CDR diversity.
+• Structural role of CDR loops in antigen recognition.
+
+Computational methods
+
+• Diffusion models for antibody generation. ([PMC][3])
+• SE(3) diffusion for antibody design. ([arXiv][1])
+• Physics-guided antibody diffusion models. ([researchgate.net][2])
+
+---
+
+# Pipeline 4 — Structure-Guided Antibody Optimization
+
+**RFdiffusion → AntiFold → IgFold**
+
+## Scientific rationale
+
+Pipeline 4 focuses on **improving an existing antibody rather than designing one from scratch**.
+
+Many therapeutic antibodies originate from experimental discovery methods such as phage display or immunization. While these antibodies bind their target, they often require optimization for:
+
+• improved affinity
+• improved stability
+• reduced aggregation
+• improved expression
+
+The key scientific principle behind this pipeline is **structure-guided optimization**.
+
+If the structure of the antibody–antigen complex is known, computational models can propose mutations that improve binding interactions.
+
+---
+
+## Step 1 — RFdiffusion structural perturbation
+
+RFdiffusion is used here not to generate entire antibodies but to **perturb the binding interface**.
+
+Because RFdiffusion generates structures through iterative denoising, it can explore alternative backbone conformations near the existing structure.
+
+These modifications often occur in CDR loops, where small changes in orientation can significantly improve binding.
+
+The model is conditioned on the antigen epitope to ensure that proposed structures remain compatible with the binding interface.
+
+Experimental work has demonstrated that RFdiffusion can generate antibodies that bind user-specified epitopes with atomic-level accuracy. ([Nature][4])
+
+---
+
+## Step 2 — AntiFold inverse folding
+
+Once a modified backbone is generated, AntiFold predicts sequences compatible with that structure.
+
+AntiFold is an antibody-specific inverse folding model trained on antibody structures.
+
+Unlike general protein design models, AntiFold incorporates **antibody-specific structural constraints**, such as conserved framework residues and canonical CDR loop conformations.
+
+This allows it to propose mutations that preserve antibody folding while potentially improving binding interactions.
+
+---
+
+## Step 3 — Structural validation
+
+IgFold is used again to validate the final structure.
+
+Because antibody folding is sensitive to small mutations, structural validation is essential before experimental testing.
+
+---
+
+## Biological interpretation
+
+This pipeline is analogous to **directed evolution**, where mutations are introduced into an antibody and variants with improved binding are selected.
+
+However, instead of random mutagenesis, AI models propose **structure-guided mutations**, dramatically reducing the experimental search space.
+
+---
+
+## Advantages
+
+• Efficient optimization of existing antibodies
+• Preserves structural stability
+• Focuses on binding interface improvements
+
+---
+
+## Limitations
+
+• Requires an initial antibody structure
+• May miss entirely new binding modes
+
+---
+
+## References
+
+• RFdiffusion antibody design studies. ([Nature][4])
+• Antibody-specific diffusion design models. ([SAGE Journals][5])
 
 ---
 
 # Pipeline 5 — Sequence-Only Antibody Library Generation
 
-**Workflow**
+**Antibody Language Model → AntiBERTy → IgFold → BioPhi**
 
-Generative LM → AntiBERTy → IgFold → BioPhi
+## Scientific rationale
 
-A generative language model produces large libraries of antibody sequences.
+Unlike structure-based pipelines, Pipeline 5 explores **sequence space first**.
 
-AntiBERTy embeddings cluster sequences and identify candidates with natural-like features.
+The human immune system generates enormous antibody diversity through **V(D)J recombination**, junctional diversity, and somatic hypermutation.
 
-IgFold predicts structures for selected candidates.
+The total theoretical antibody sequence space is estimated to exceed **10¹³–10¹⁵ possible antibodies**.
 
-BioPhi ensures human-like sequences.
+Exploring this space experimentally is impossible.
 
-This pipeline prioritizes **diversity and exploration** rather than antigen specificity.
-
----
-
-# Pipeline 6 — Developability-First Screening
-
-**Workflow**
-
-AbLang → AntiBERTy → BioPhi
-
-This pipeline focuses on filtering large antibody datasets for developability.
-
-AbLang corrects or fills missing sequence regions.
-
-AntiBERTy evaluates sequence naturalness.
-
-BioPhi evaluates humanness.
+Large antibody language models attempt to learn the statistical patterns of antibody repertoires and generate plausible sequences.
 
 ---
 
-# Pipeline 7 — In Silico Binding Screening
+## Step 1 — Generative antibody language model
 
-**Workflow**
+Generative models such as **AB-Gen, IgLM, and IgBERT** are trained on millions of antibody sequences from databases like Observed Antibody Space.
 
-AntiBERTy → IgFold → AlphaFold-Multimer
+These models learn patterns such as:
 
-Large sequence libraries are screened computationally.
+• germline gene usage
+• CDR length distributions
+• conserved framework motifs
 
-AntiBERTy clusters candidates.
+During generation, the model samples sequences that resemble natural antibodies but may not exist in nature.
 
-IgFold predicts structures.
-
-AlphaFold-Multimer models antibody-antigen complexes.
-
-This allows evaluation of thousands of antibodies before laboratory testing.
+This allows exploration of enormous regions of sequence space.
 
 ---
 
-# Pipeline 8 — Affinity Maturation
+## Step 2 — AntiBERTy embedding analysis
 
-**Workflow**
+AntiBERTy generates embeddings representing antibody sequences in a high-dimensional space.
 
-AntiBERTy → ProteinMPNN → IgFold
+Sequences that cluster near known functional antibodies are considered more likely to bind antigens.
 
-Starting from a known antibody, AntiBERTy identifies residues that may improve binding.
-
-ProteinMPNN proposes mutations.
-
-IgFold evaluates structural stability.
+Embedding analysis is therefore used to filter large sequence libraries.
 
 ---
 
-# Pipeline 9 — Antibody Humanization
+## Step 3 — Structural prediction
 
-**Workflow**
+IgFold predicts structures for promising sequences.
 
-AbLang → IgFold → BioPhi
+Because language models generate sequences without structural constraints, many sequences may not fold correctly.
 
-This pipeline transforms non-human antibodies into human-like sequences while preserving structure.
-
----
-
-# Pipeline 10 — Inverse Folding Design
-
-**Workflow**
-
-ProteinMPNN → IgFold → BioPhi
-
-ProteinMPNN designs sequences compatible with a fixed backbone scaffold.
+Structure prediction removes these invalid designs.
 
 ---
 
-# Pipeline 11 — Interface Engineering
+## Step 4 — Developability filtering
 
-**Workflow**
+BioPhi evaluates humanness and immunogenicity risk.
 
-RFdiffusion → ProteinMPNN → RosettaDock
-
-RFdiffusion designs backbone geometry at the antigen interface.
-
-ProteinMPNN sequences the design.
-
-RosettaDock refines binding interactions.
+Sequences that diverge significantly from human antibody repertoires are removed.
 
 ---
 
-# Pipeline 12 — End-to-End Binder Discovery
+## Biological interpretation
 
-**Workflow**
+This pipeline mirrors **natural immune repertoire generation**, where large numbers of antibodies are generated before antigen selection.
 
-Generative LM → IgFold → AlphaFold-Multimer → BioPhi
-
-This pipeline searches massive sequence space and filters candidates by structure and binding.
+The difference is that AI models generate sequences computationally rather than through biological recombination.
 
 ---
 
-# Pipeline 13 — Epitope-Focused CDR Design
+## Advantages
 
-**Workflow**
-
-DiffAb → ProteinMPNN → IgFold
-
-DiffAb directly generates loops tailored to antigen epitopes.
+• Extremely large sequence exploration
+• Requires no antigen structure
+• Fast generation
 
 ---
 
-# Pipeline 14 — Framework-Constrained Loop Generation
+## Limitations
 
-**Workflow**
-
-AbDiffuser → AntiFold → IgFold
-
-Loops are redesigned while preserving antibody framework regions.
+• Binding is not guaranteed
+• Many generated sequences may not fold properly
 
 ---
 
-# Pipeline 15 — Structural Sequence Optimization
+## References
 
-**Workflow**
+• Reviews of AI-driven antibody generation. ([PMC][3])
+• Diffusion and generative models for antibody design. ([biorxiv.org][6])
 
-AntiFold → BioPhi → IgFold
 
-Inverse folding improves sequence fitness for a given structure.
+[1]: https://arxiv.org/abs/2405.07622?utm_source=chatgpt.com "De novo antibody design with SE(3) diffusion"
+[2]: https://www.researchgate.net/publication/383360200_Antibody_Design_Using_a_Score-based_Diffusion_Model_Guided_by_Evolutionary_Physical_and_Geometric_Constraints?utm_source=chatgpt.com "(PDF) Antibody Design Using a Score-based Diffusion ..."
+[3]: https://pmc.ncbi.nlm.nih.gov/articles/PMC10361400/?utm_source=chatgpt.com "AI Models for Protein Design are Driving Antibody Engineering"
+[4]: https://www.nature.com/articles/s41586-025-09721-5?utm_source=chatgpt.com "Atomically accurate de novo design of antibodies with ..."
+[5]: https://journals.sagepub.com/doi/10.1177/21679436251385401?utm_source=chatgpt.com "Stunning Progress in De Novo Computationally Designed ..."
+[6]: https://www.biorxiv.org/content/10.1101/2024.10.07.617023v3.full-text?utm_source=chatgpt.com "Benchmarking Generative Models for Antibody Design & ..."
+
+
+# Pipeline 6 — Developability-First Antibody Design
+
+**AbLang / IgLM / Antibody LLM → AntiBERTy → BioPhi → optional structure prediction**
+
+## Scientific motivation
+
+One of the biggest challenges in antibody therapeutics is not discovering binders—it is discovering **drug-like antibodies**.
+
+Many antibodies that bind targets strongly fail during drug development due to:
+
+* aggregation
+* low expression
+* poor solubility
+* immunogenicity
+* chemical instability
+
+These problems collectively fall under the category of **developability**.
+
+Historically, these issues were detected **late in drug development**, often after significant experimental investment. Modern computational pipelines attempt to **filter problematic antibodies earlier**.
+
+Pipeline 6 therefore flips the usual design paradigm.
+
+Instead of:
+
+```
+binding → developability
+```
+
+the pipeline prioritizes:
+
+```
+developability → binding
+```
+
+The reasoning is that it is easier to **search for binding antibodies within a developable sequence space** than to fix problematic antibodies afterward.
 
 ---
 
-# Pipeline 16 — Hybrid Sequence and Structure Design
+## Biological foundations of developability
 
-**Workflow**
+Therapeutic antibodies must satisfy multiple biochemical constraints:
 
-Sequence Prompt → RFdiffusion → ProteinMPNN → IgFold
+### 1. Solubility
 
-Human knowledge guides initial sequence motifs, which AI expands into full antibody structures.
+Antibodies must remain soluble at high concentrations (>100 mg/mL) required for therapeutic dosing.
+
+Hydrophobic patches on antibody surfaces often lead to aggregation.
+
+### 2. Stability
+
+Antibodies must remain stable under physiological conditions and during manufacturing.
+
+This involves maintaining the immunoglobulin fold.
+
+### 3. Immunogenicity
+
+Antibodies that diverge significantly from human germline sequences can trigger immune responses.
+
+### 4. Expression efficiency
+
+Biopharmaceutical production relies on expression systems such as CHO cells.
+
+Sequences with unusual structural features often express poorly.
+
+Because these factors are strongly correlated with **sequence patterns**, machine learning models trained on antibody repertoires can detect them.
 
 ---
 
-# Pipeline 17 — Fully Integrated Discovery Pipeline
+## Step 1 — Antibody language models
 
-**Workflow**
+Pipeline 6 typically begins with a **large antibody language model** such as:
 
-RFdiffusion → ProteinMPNN → IgFold → AlphaFold-Multimer → BioPhi
+* IgLM
+* AbLang
+* IgBERT
+* S²ALM
 
-This is the closest approximation of a **fully automated antibody design pipeline**.
+These models are trained on **hundreds of millions of antibody sequences** extracted from immune repertoire sequencing datasets.
+
+For example, the AntiBERTy language model was trained on **558 million natural antibody sequences**, capturing statistical patterns across human antibody repertoires. ([Nature][1])
+
+Language models learn the **“grammar” of antibody sequences**, including:
+
+* framework motifs
+* germline gene usage
+* CDR length distributions
+* conserved residues important for folding
+
+By sampling from these models, the pipeline generates candidate antibodies that resemble natural sequences.
+
+This step ensures candidates start within a **biologically plausible region of sequence space**.
+
+---
+
+## Step 2 — AntiBERTy embedding filtering
+
+AntiBERTy embeddings provide high-dimensional representations of antibody sequences.
+
+These embeddings capture structural and evolutionary relationships between antibodies.
+
+Research has shown that antibodies cluster in embedding space according to:
+
+* maturation stage
+* structural class
+* binding properties
+
+Embedding similarity therefore provides a **proxy for developability**.
+
+Sequences far from natural antibody clusters often correspond to unstable or non-functional antibodies.
+
+Thus, the pipeline filters sequences based on embedding distance.
+
+---
+
+## Step 3 — Developability scoring
+
+The next stage applies developability predictors.
+
+Tools commonly used include:
+
+* BioPhi
+* CamSol
+* SAP (spatial aggregation propensity)
+* solubility prediction models
+
+BioPhi specifically predicts **humanness** by comparing candidate sequences to large human antibody repertoires.
+
+Sequences that resemble human antibodies are less likely to be immunogenic.
+
+This step dramatically reduces the risk of downstream development failure.
+
+---
+
+## Step 4 — Optional structural validation
+
+After developability filtering, structure prediction may be applied using models like IgFold.
+
+IgFold uses embeddings from antibody language models combined with graph neural networks to directly predict antibody structures from sequence. ([Nature][1])
+
+Structural validation confirms that the sequence can fold into a realistic antibody structure.
+
+---
+
+## Scientific implications
+
+Pipeline 6 demonstrates an important principle:
+
+**drug-like sequence space is much smaller than total sequence space.**
+
+By restricting generation to sequences similar to human antibodies, the pipeline focuses search on candidates with higher translational potential.
+
+---
+
+## Key references
+
+Scientific foundations
+
+* Antibody developability and therapeutic design
+* Antibody sequence diversity and repertoire studies
+
+Computational methods
+
+* AntiBERTy antibody language model
+* IgLM antibody sequence generator
+* IgFold antibody structure predictor
+
+Key papers
+
+* Ruffolo et al., *AntiBERTy and IgFold models for antibody representation and structure prediction*
+* Shuai et al., *IgLM generative antibody language model*
+
+---
+
+# Pipeline 7 — Large-Scale Binding Prediction Pipeline
+
+**AntiBERTy → IgFold → AlphaFold-Multimer → docking / scoring**
+
+## Scientific motivation
+
+Pipeline 7 addresses a key practical problem:
+
+**screening extremely large antibody libraries.**
+
+Modern generative models can produce **millions of candidate antibodies**.
+
+Experimentally testing all of them is impossible.
+
+Instead, computational pipelines attempt to **predict binding affinity before experiments**.
+
+---
+
+## Biological basis of antibody binding
+
+Antibody binding depends on several physical factors:
+
+### Shape complementarity
+
+The antibody paratope must geometrically complement the antigen epitope.
+
+### Hydrogen bonding
+
+Polar interactions stabilize antibody-antigen complexes.
+
+### Electrostatics
+
+Charged residues contribute to long-range attraction.
+
+### Hydrophobic interactions
+
+Nonpolar residues contribute to binding free energy.
+
+Together, these interactions determine **binding affinity**.
+
+Predicting them computationally is challenging but feasible using modern protein structure models.
+
+---
+
+## Step 1 — Sequence clustering using AntiBERTy
+
+The first step clusters antibody sequences using AntiBERTy embeddings.
+
+This ensures that screening covers **diverse regions of sequence space**.
+
+Instead of evaluating millions of nearly identical sequences, the pipeline selects representative sequences from each cluster.
+
+This dramatically reduces computational cost.
+
+---
+
+## Step 2 — Structure prediction with IgFold
+
+The next stage predicts antibody structures.
+
+IgFold is particularly useful for this step because it can predict antibody structures **in under 25 seconds**, enabling large-scale structural screening. ([Nature][1])
+
+IgFold predicts the positions of backbone atoms and provides confidence scores for each residue.
+
+This step produces structural models for thousands of candidate antibodies.
+
+---
+
+## Step 3 — Complex prediction using AlphaFold-Multimer
+
+The predicted antibody structures are then combined with antigen structures.
+
+AlphaFold-Multimer predicts the antibody-antigen complex.
+
+The model estimates:
+
+* interaction interface
+* residue contacts
+* structural confidence scores
+
+These predictions provide a rough estimate of binding affinity.
+
+---
+
+## Step 4 — docking and energy scoring
+
+Additional scoring methods may be applied, such as:
+
+* RosettaDock
+* HADDOCK
+* molecular dynamics simulations
+
+These methods estimate binding free energy.
+
+Candidates with favorable predicted interactions are prioritized for experimental testing.
+
+---
+
+## Scientific implications
+
+This pipeline transforms antibody discovery from:
+
+```
+experiment-first → computational validation
+```
+
+to
+
+```
+computational screening → experimental validation
+```
+
+The computational step reduces the experimental search space by several orders of magnitude.
+
+---
+
+## References
+
+Scientific foundations
+
+* Protein-protein binding thermodynamics
+* Antibody-antigen interface structure
+
+Computational methods
+
+* IgFold structure prediction
+* AlphaFold-Multimer complex prediction
+* antibody embedding models
+
+Key papers
+
+* Ruffolo et al., IgFold structure prediction
+* Jumper et al., AlphaFold protein structure prediction
+
+---
+
+# Pipeline 8 — Affinity Maturation Simulation Pipeline
+
+**AntiBERTy → ProteinMPNN → IgFold**
+
+## Scientific motivation
+
+In the immune system, antibodies undergo **affinity maturation**.
+
+During this process:
+
+1. B-cells accumulate mutations in antibody genes.
+2. Mutated antibodies are expressed on the cell surface.
+3. Cells with higher-affinity antibodies are selected.
+
+This evolutionary process produces antibodies with extremely high affinity.
+
+Pipeline 8 attempts to **simulate affinity maturation computationally**.
+
+---
+
+## Biological mechanism of affinity maturation
+
+Affinity maturation occurs in germinal centers of lymph nodes.
+
+The process involves:
+
+* somatic hypermutation
+* clonal expansion
+* selection for improved binding
+
+Mutations primarily occur in CDR loops.
+
+Over multiple rounds of mutation and selection, antibodies evolve toward higher affinity.
+
+---
+
+## Step 1 — identifying mutable residues
+
+AntiBERTy embeddings identify residues that are likely to influence binding.
+
+Language models capture patterns of natural antibody evolution.
+
+Residues that deviate from common patterns may represent opportunities for optimization.
+
+---
+
+## Step 2 — sequence optimization with ProteinMPNN
+
+ProteinMPNN proposes mutations compatible with the antibody structure.
+
+Because the model is trained on structural data, it avoids mutations that would destabilize the protein fold.
+
+This step generates candidate variants.
+
+---
+
+## Step 3 — structural validation
+
+IgFold predicts the structure of each variant.
+
+Variants that maintain structural integrity are retained.
+
+---
+
+## Scientific implications
+
+Pipeline 8 replaces experimental directed evolution with **computational evolution**.
+
+Rather than screening millions of variants in vitro, the pipeline evaluates them in silico.
+
+This dramatically reduces experimental cost.
+
+---
+
+## References
+
+Scientific foundations
+
+* Germinal center affinity maturation
+* antibody evolutionary dynamics
+
+Computational methods
+
+* ProteinMPNN inverse folding
+* AntiBERTy antibody embeddings
+
+Key papers
+
+* Dauparas et al., ProteinMPNN (Science 2022)
+* Ruffolo et al., AntiBERTy antibody language model
+
+
+[1]: https://www.nature.com/articles/s41467-023-38063-x?utm_source=chatgpt.com "Fast, accurate antibody structure prediction from deep ..."
+
+
+# Pipeline 9 — Antibody Humanization Pipeline
+
+**AbLang / IgLM → IgFold → BioPhi**
+
+## Scientific motivation
+
+Many therapeutic antibodies originate from **non-human organisms**, especially mice. Mouse antibodies can bind human targets effectively because they are generated through immunization experiments, but they often trigger immune responses when administered to patients. This immune response occurs because the human immune system recognizes non-human antibody sequences as foreign proteins.
+
+Humanization pipelines therefore aim to **modify non-human antibodies so that they resemble human antibodies while preserving binding affinity**.
+
+The concept originates from classic antibody engineering work in the 1980s and 1990s. Researchers discovered that the antigen-binding properties of antibodies are largely determined by the **complementarity-determining regions (CDRs)**, while the **framework regions (FRs)** maintain structural stability. By transplanting CDR loops from a mouse antibody into a human framework, scientists could generate antibodies that retained antigen specificity while appearing human-like.
+
+However, simple CDR grafting often disrupts binding because certain framework residues also contribute to CDR orientation. Modern AI-based humanization pipelines address this challenge by learning the complex relationships between framework residues and binding structure.
+
+---
+
+## Step 1 — Language-model–based mutation suggestions
+
+The first stage of Pipeline 9 uses antibody language models such as **AbLang or IgLM** to suggest mutations that increase sequence similarity to human antibodies.
+
+These models are trained on millions of antibody sequences and learn statistical patterns of human antibody repertoires. When applied to a mouse antibody, the model predicts which residues should be replaced to make the sequence more “human-like.”
+
+This process resembles a probabilistic sequence correction task. The model identifies residues that deviate from human repertoire patterns and suggests replacements that preserve structural compatibility.
+
+Large antibody language models are particularly useful here because they capture long-range dependencies between residues. For example, certain framework mutations are only compatible when accompanied by compensatory mutations elsewhere in the structure.
+
+---
+
+## Step 2 — Structural validation with IgFold
+
+After candidate mutations are generated, the next step verifies whether the mutated sequence can still fold into the correct antibody structure.
+
+IgFold predicts antibody structures from sequence using deep learning models trained on large antibody datasets. The model combines embeddings from antibody language models with graph neural networks that predict backbone coordinates.
+
+The speed of IgFold is a major advantage in design pipelines: it can predict antibody structures in **under 25 seconds while maintaining accuracy comparable to AlphaFold models**. ([Nature][1])
+
+This step ensures that the humanized antibody maintains the correct geometry of the antigen-binding site.
+
+---
+
+## Step 3 — Humanness scoring with BioPhi
+
+The final stage evaluates the degree of humanization using tools such as **BioPhi**.
+
+BioPhi compares candidate sequences to large databases of human antibody sequences and calculates a “humanness” score. This score estimates the likelihood that the antibody will trigger an immune response.
+
+High-scoring antibodies resemble natural human antibodies and therefore have lower immunogenicity risk.
+
+---
+
+## Biological interpretation
+
+Pipeline 9 essentially simulates the **evolutionary trajectory of antibodies within the human immune repertoire**.
+
+Natural antibodies arise from recombination of human germline genes and accumulate mutations during affinity maturation. By forcing candidate sequences toward this distribution, the pipeline ensures compatibility with the human immune system.
+
+---
+
+## Advantages
+
+* Reduces risk of immunogenicity
+* Preserves antigen binding
+* Compatible with existing therapeutic antibodies
+
+---
+
+## Limitations
+
+* Humanization may reduce binding affinity
+* Some non-human residues are essential for binding and must be retained
+
+---
+
+## References
+
+Scientific foundations
+
+* Antibody humanization and CDR grafting principles
+* Immunogenicity in therapeutic antibodies
+
+Computational methods
+
+* IgFold antibody structure prediction model
+* Antibody language models such as AbLang
+
+Key sources
+
+* Ruffolo et al., *IgFold: fast antibody structure prediction*. ([Nature][1])
+* Reviews of antibody structure prediction and modeling. ([Springer][2])
+
+---
+
+# Pipeline 10 — Inverse Folding Antibody Design
+
+**ProteinMPNN → IgFold → BioPhi**
+
+## Scientific motivation
+
+Pipeline 10 focuses on the **inverse folding problem**, a fundamental challenge in computational protein design.
+
+In classical protein folding, the goal is to predict structure from sequence. In inverse folding, the goal is the opposite: **find a sequence that will fold into a desired structure**.
+
+This approach is particularly powerful in antibody engineering because structural models of antibody frameworks or binding interfaces are often available. Once a suitable backbone structure is defined, inverse folding algorithms can generate sequences that stabilize that structure.
+
+---
+
+## Step 1 — ProteinMPNN sequence design
+
+ProteinMPNN is one of the most widely used inverse folding models.
+
+The algorithm represents a protein structure as a graph where residues are nodes connected by edges representing spatial proximity. Message-passing neural networks propagate information through the graph to determine which amino acids best stabilize each position.
+
+ProteinMPNN learns sequence-structure relationships from large datasets of experimentally solved proteins. As a result, it can generate sequences compatible with complex backbone geometries.
+
+The model performs significantly better than traditional physics-based design methods such as Rosetta in sequence recovery benchmarks. ([researchgate.net][3])
+
+Inverse folding models like ProteinMPNN effectively perform **the reverse of structure prediction** by identifying sequences that fold into a given backbone structure. ([neurosnap.ai][4])
+
+---
+
+## Step 2 — Structural validation
+
+After designing candidate sequences, the pipeline validates them using structure prediction models such as IgFold.
+
+If the predicted structure matches the intended backbone geometry, the sequence is considered structurally viable.
+
+This feedback loop is essential because inverse folding models may sometimes generate sequences that are theoretically compatible with the backbone but do not fold correctly in practice.
+
+---
+
+## Step 3 — Developability filtering
+
+The final stage again applies developability filters such as BioPhi.
+
+Because inverse folding models focus primarily on structural stability, they may generate sequences that are difficult to manufacture or immunogenic.
+
+Developability filters remove these problematic candidates.
+
+---
+
+## Scientific implications
+
+Inverse folding pipelines enable **structure-based antibody design**.
+
+Instead of searching randomly through sequence space, the pipeline begins with a desired binding geometry and computes sequences that realize that structure.
+
+This dramatically reduces the search space of possible antibodies.
+
+---
+
+## Advantages
+
+* Maintains structural stability
+* Efficient exploration of sequence space
+* Compatible with structural design pipelines
+
+---
+
+## Limitations
+
+* Requires accurate backbone structures
+* Cannot easily discover completely new structural motifs
+
+---
+
+## References
+
+Scientific foundations
+
+* Protein design and inverse folding concepts
+
+Computational methods
+
+* ProteinMPNN inverse folding model
+* IgFold structure prediction
+
+Key sources
+
+* Dauparas et al., *ProteinMPNN deep learning sequence design*. ([researchgate.net][3])
+* Reviews of inverse folding and protein design. ([ScienceDirect][5])
+
+---
+
+# Pipeline 11 — Antibody–Antigen Interface Engineering
+
+**RFdiffusion → ProteinMPNN → RosettaDock / structural refinement**
+
+## Scientific motivation
+
+Pipeline 11 focuses specifically on **engineering the antibody-antigen interface**.
+
+Binding between antibodies and antigens is governed by the physical interactions between residues in the paratope and epitope.
+
+Key determinants of binding include:
+
+* hydrogen bonds
+* electrostatic interactions
+* hydrophobic packing
+* shape complementarity
+
+Optimizing these interactions can dramatically improve antibody affinity.
+
+---
+
+## Step 1 — RFdiffusion interface generation
+
+RFdiffusion generates protein backbones conditioned on the geometry of the antigen surface.
+
+The diffusion process iteratively denoises random coordinates while enforcing constraints that guide the generated structure toward the target epitope.
+
+This enables the model to design CDR loops oriented precisely toward antigen binding sites.
+
+Diffusion models have become powerful tools for protein design because they can explore large structural spaces while maintaining physical plausibility. ([PMC][6])
+
+---
+
+## Step 2 — Sequence design with ProteinMPNN
+
+After generating backbone geometries, ProteinMPNN assigns amino acid sequences.
+
+Because the model considers spatial relationships between residues, it can design sequences that maximize stabilizing interactions across the binding interface.
+
+---
+
+## Step 3 — Interface refinement
+
+The final stage uses physics-based docking or refinement methods such as:
+
+* RosettaDock
+* HADDOCK
+* molecular dynamics simulations
+
+These methods estimate binding free energy by evaluating physical interactions between residues.
+
+Candidates with favorable interaction energies are prioritized for experimental testing.
+
+---
+
+## Scientific implications
+
+This pipeline integrates **AI-driven generative design with physics-based modeling**.
+
+The diffusion model explores structural possibilities, while docking algorithms evaluate the energetic feasibility of the interaction.
+
+This hybrid approach combines the strengths of machine learning and classical computational chemistry.
+
+---
+
+## Advantages
+
+* Explicitly optimizes antibody-antigen interactions
+* Generates high-affinity candidates
+* Combines AI design with physical modeling
+
+---
+
+## Limitations
+
+* Computationally expensive
+* Requires accurate antigen structure
+
+---
+
+## References
+
+Scientific foundations
+
+* Protein–protein interaction energetics
+
+Computational methods
+
+* RFdiffusion generative protein design
+* ProteinMPNN sequence design
+* docking algorithms
+
+Key sources
+
+* Diffusion-based protein structure generation. ([PMC][6])
+* ProteinMPNN sequence design research. ([researchgate.net][3])
+
+[1]: https://www.nature.com/articles/s41467-023-38063-x "https://www.nature.com/articles/s41467-023-38063-x"
+[2]: https://link.springer.com/article/10.1007/s11831-025-10404-7 "https://link.springer.com/article/10.1007/s11831-025-10404-7"
+[3]: https://www.researchgate.net/publication/363608659_Robust_deep_learning-based_protein_sequence_design_using_ProteinMPNN "https://www.researchgate.net/publication/363608659_Robust_deep_learning-based_protein_sequence_design_using_ProteinMPNN"
+[4]: https://neurosnap.ai/blog/post/what-is-inverse-folding-how-to-practically-apply-it/65908e76104e7841a40c3187 "https://neurosnap.ai/blog/post/what-is-inverse-folding-how-to-practically-apply-it/65908e76104e7841a40c3187"
+[5]: https://www.sciencedirect.com/science/article/abs/pii/S0092867425006804 "https://www.sciencedirect.com/science/article/abs/pii/S0092867425006804"
+[6]: https://pmc.ncbi.nlm.nih.gov/articles/PMC10844308/ "https://pmc.ncbi.nlm.nih.gov/articles/PMC10844308/"
+
+
+
+# Pipeline 12 — End-to-End Antibody Binder Discovery
+
+**Generative Antibody LM → Structure Prediction → Complex Prediction → Developability Filtering**
+
+## Scientific motivation
+
+Pipeline 12 represents the first step toward **fully automated antibody discovery**. Traditional antibody discovery relies on experimental screening methods such as phage display or hybridoma generation, which require testing millions of candidate antibodies in laboratory experiments.
+
+The motivation for this pipeline is to replace that expensive experimental screening with **computational triaging**.
+
+The pipeline therefore integrates multiple AI components into a sequential workflow that moves from **sequence generation → structure prediction → binding evaluation → developability filtering**.
+
+This architecture reflects the central constraints of antibody therapeutics:
+
+1. The antibody must **exist as a stable protein structure**.
+2. It must **bind the antigen strongly**.
+3. It must **exhibit acceptable developability properties**.
+
+If any of these constraints fail, the antibody is unlikely to become a viable drug candidate.
+
+---
+
+## Step 1 — Generative sequence models
+
+The pipeline begins with **antibody language models** trained on immune repertoire data.
+
+Examples include:
+
+* IgLM
+* AntiBERTy
+* IgBERT
+* AbLang
+
+These models learn statistical patterns from millions of natural antibody sequences and can generate new sequences that resemble those found in immune repertoires.
+
+The reason these models work is that antibody repertoires contain **evolutionarily optimized sequence patterns**.
+
+Language models implicitly learn rules governing:
+
+* framework stability
+* germline gene usage
+* CDR loop lengths
+* sequence co-evolution patterns
+
+By sampling from these models, the pipeline generates candidate antibodies likely to fold correctly.
+
+---
+
+## Step 2 — Structural prediction
+
+After generating candidate sequences, the next step predicts their structures.
+
+Antibody structure prediction is easier than general protein folding because antibody frameworks adopt relatively conserved folds. Modern deep learning models exploit this property.
+
+Examples include:
+
+* IgFold
+* ABodyBuilder
+* AlphaFold-Multimer
+
+These models predict the **three-dimensional arrangement of the antibody variable region**, including the orientation of CDR loops.
+
+This stage removes sequences that cannot fold into viable antibody structures.
+
+---
+
+## Step 3 — Antibody–antigen complex prediction
+
+The next stage predicts how the antibody interacts with the antigen.
+
+Complex prediction models evaluate:
+
+* binding interface geometry
+* residue contact patterns
+* structural confidence scores
+
+Diffusion-based models such as DiffAb can also generate antibodies directly conditioned on antigen structures. These models jointly model sequence and structure of antibody CDRs while incorporating antigen information. ([PMC][1])
+
+The binding between antibodies and antigens is largely determined by the complementarity-determining regions (CDRs), which form the antigen-binding interface. ([NeurIPS Proceedings][2])
+
+Thus, complex prediction focuses heavily on evaluating CDR-epitope interactions.
+
+---
+
+## Step 4 — Developability filtering
+
+Finally, the pipeline evaluates whether the antibody is suitable for therapeutic development.
+
+Common filters include:
+
+* humanness scoring
+* aggregation propensity
+* solubility prediction
+* stability estimation
+
+BioPhi and related tools compare candidate sequences to large human antibody repertoires to estimate immunogenicity risk.
+
+---
+
+## Scientific implications
+
+Pipeline 12 represents the **closest approximation to a fully computational antibody discovery workflow** currently available.
+
+Instead of experimentally screening millions of antibodies, researchers can computationally evaluate thousands and then experimentally test only the most promising candidates.
+
+---
+
+## Advantages
+
+* Dramatically reduces experimental search space
+* Integrates multiple AI tools into a unified workflow
+* Scalable to very large antibody libraries
+
+---
+
+## Limitations
+
+* Binding predictions remain imperfect
+* Requires accurate antigen structure
+
+---
+
+## References
+
+Scientific foundations
+
+* Antibody binding interface structure and CDR function
+
+Computational methods
+
+* Diffusion-based antibody generation models
+* antibody structure prediction models
+
+Key references
+
+* Luo et al., DiffAb diffusion antibody design model
+* Reviews of AI-driven antibody engineering pipelines ([PMC][1])
+
+---
+
+# Pipeline 13 — Epitope-Focused Antibody Design
+
+**Diffusion Design Model → Sequence Design → Structural Validation**
+
+## Scientific motivation
+
+Most antibody discovery methods target entire antigens rather than specific regions. However, in many therapeutic contexts the goal is to bind a **particular epitope**.
+
+Examples include:
+
+* blocking viral receptor-binding domains
+* inhibiting enzyme active sites
+* targeting specific conformational epitopes
+
+Pipeline 13 focuses on designing antibodies that bind **specific antigen surfaces**.
+
+This approach requires models capable of understanding **protein-protein interface geometry**.
+
+---
+
+## Biological foundations of epitope targeting
+
+Antibody binding occurs through a complementary interface between the antibody **paratope** and the antigen **epitope**.
+
+The geometry of this interface determines:
+
+* binding affinity
+* binding specificity
+* cross-reactivity with other proteins
+
+Epitope-focused design therefore requires generating CDR loops that precisely match the topology of the antigen surface.
+
+---
+
+## Step 1 — Antigen-conditioned diffusion models
+
+Diffusion models such as DiffAb generate antibodies conditioned on antigen structures.
+
+These models jointly model sequence and structure of antibody CDRs using equivariant neural networks.
+
+Equivariant networks ensure that predictions remain consistent regardless of how the protein structure is rotated in space.
+
+DiffAb denoises both residue identity and spatial coordinates during generation, allowing simultaneous sequence-structure design. ([PMC][1])
+
+This approach is powerful because it explicitly incorporates antigen geometry into the design process.
+
+---
+
+## Step 2 — Sequence optimization
+
+After generating candidate structures, sequence optimization methods such as ProteinMPNN assign amino acids that stabilize the backbone structure.
+
+This step ensures that the generated antibody structure can exist as a stable protein.
+
+---
+
+## Step 3 — Structural validation
+
+Structure prediction models verify that the generated sequence folds into the intended structure.
+
+If the predicted structure deviates significantly from the generated backbone, the candidate is rejected.
+
+---
+
+## Scientific implications
+
+Epitope-focused pipelines allow researchers to design antibodies targeting **specific functional sites** on proteins.
+
+This is particularly valuable for:
+
+* neutralizing antibodies against viruses
+* inhibitory antibodies against enzymes
+* antibodies targeting signaling receptors
+
+---
+
+## Advantages
+
+* High specificity
+* Enables rational therapeutic targeting
+* Reduces off-target binding
+
+---
+
+## Limitations
+
+* Requires high-resolution antigen structures
+* Binding affinity predictions remain uncertain
+
+---
+
+## References
+
+Scientific foundations
+
+* Antibody-epitope recognition mechanisms
+
+Computational methods
+
+* Diffusion-based antibody design models
+
+Key references
+
+* DiffAb antigen-specific antibody design ([NeurIPS Proceedings][3])
+
+---
+
+# Pipeline 14 — Framework-Constrained Antibody Design
+
+**Fixed Framework → CDR Design → Sequence Optimization**
+
+## Scientific motivation
+
+Many therapeutic antibodies share similar **framework structures** derived from human germline genes.
+
+Pipeline 14 leverages this fact by keeping the antibody framework fixed and redesigning only the **CDR loops** responsible for antigen binding.
+
+This approach balances **structural stability and functional diversity**.
+
+---
+
+## Biological foundations
+
+Antibodies consist of two structural components:
+
+1. **Framework regions (FRs)**
+2. **Complementarity-determining regions (CDRs)**
+
+Framework regions form the stable β-sheet scaffold of the antibody.
+
+CDR loops extend from this scaffold and interact directly with antigens.
+
+Because framework structures are highly conserved, they provide a stable platform for designing new CDR loops.
+
+---
+
+## Step 1 — framework selection
+
+The pipeline begins with a known antibody framework, often derived from a human germline gene.
+
+Using human frameworks ensures good developability and reduces immunogenicity risk.
+
+---
+
+## Step 2 — CDR loop design
+
+Generative models such as diffusion networks or autoregressive protein models generate new CDR loop geometries compatible with the framework.
+
+These models explore possible loop conformations that could interact with the antigen.
+
+---
+
+## Step 3 — sequence design
+
+Inverse folding algorithms assign amino acid sequences compatible with the loop structures.
+
+These algorithms consider steric constraints and residue interactions to ensure structural stability.
+
+---
+
+## Step 4 — structural validation
+
+Structure prediction confirms that the redesigned loops fold correctly within the framework.
+
+---
+
+## Scientific implications
+
+Framework-constrained pipelines are widely used because they balance **design flexibility and structural reliability**.
+
+By fixing the framework, the pipeline reduces the dimensionality of the design problem.
+
+---
+
+## Advantages
+
+* high structural stability
+* reduced immunogenicity risk
+* computationally efficient
+
+---
+
+## Limitations
+
+* limited exploration of new antibody scaffolds
+* may miss novel binding geometries
+
+---
+
+## References
+
+Scientific foundations
+
+* antibody framework stability
+* CDR loop diversity
+
+Computational methods
+
+* diffusion models for antibody loop design
+* inverse folding algorithms
+
+Key references
+
+* reviews of AI-driven antibody design methods ([PMC][4])
+
+
+[1]: https://pmc.ncbi.nlm.nih.gov/articles/PMC10361400/?utm_source=chatgpt.com "AI Models for Protein Design are Driving Antibody Engineering"
+[2]: https://proceedings.neurips.cc/paper_files/paper/2022/hash/3fa7d76a0dc1179f1e98d1bc62403756-Abstract-Conference.html?utm_source=chatgpt.com "Antigen-Specific Antibody Design and Optimization with ..."
+[3]: https://proceedings.neurips.cc/paper_files/paper/2022/file/3fa7d76a0dc1179f1e98d1bc62403756-Paper-Conference.pdf?utm_source=chatgpt.com "Antigen-Specific Antibody Design and Optimization with ..."
+[4]: https://pmc.ncbi.nlm.nih.gov/articles/PMC12279266/?utm_source=chatgpt.com "Artificial intelligence-driven computational methods for ... - PMC"
+
+
+
+# Pipeline 15 — Structural Optimization Pipeline
+
+**Existing Antibody Structure → AntiFold / ProteinMPNN → IgFold → BioPhi**
+
+## Scientific motivation
+
+Once an antibody structure has been experimentally determined (e.g., through X-ray crystallography or cryo-electron microscopy), researchers often attempt to **optimize its sequence while preserving the overall structure**. This process is known as **structure-guided sequence optimization**.
+
+The motivation behind this pipeline is that protein structures impose strong constraints on which amino acids can appear at each position. Residues must satisfy steric constraints, hydrogen bonding patterns, and hydrophobic packing interactions. Therefore, by fixing the backbone structure and redesigning the sequence, computational algorithms can explore sequence variants that may improve stability or binding affinity.
+
+This idea is closely related to the **inverse folding problem**, where the goal is to determine which sequences are compatible with a given protein backbone.
+
+---
+
+## Step 1 — Sequence redesign with inverse folding models
+
+Inverse folding algorithms such as **ProteinMPNN** or **AntiFold** analyze the geometry of the antibody backbone and predict amino acid sequences that stabilize the structure.
+
+These models treat the protein structure as a graph where residues are nodes connected by spatial relationships. Message-passing neural networks propagate structural information across the graph to determine which residues best fit each position.
+
+ProteinMPNN has demonstrated strong performance in sequence recovery tasks, meaning it can predict native-like sequences for known protein structures. This ability allows the model to design sequences that maintain structural integrity while exploring new functional possibilities.
+
+---
+
+## Step 2 — Structural validation
+
+Once candidate sequences are generated, structure prediction models such as IgFold evaluate whether the redesigned sequence folds into the expected antibody structure.
+
+This step is essential because small sequence changes can sometimes destabilize the protein fold.
+
+---
+
+## Step 3 — Developability filtering
+
+Finally, candidate sequences are evaluated for developability using tools like BioPhi. This ensures that redesigned antibodies remain compatible with therapeutic development.
+
+---
+
+## Scientific implications
+
+Structural optimization pipelines enable **rational refinement of antibody candidates** discovered through experimental screening.
+
+By combining structural information with machine learning models, researchers can systematically explore sequence variants that improve antibody properties without disrupting the overall fold.
+
+---
+
+## References
+
+* Reviews of AI-based antibody design pipelines highlight sequence-structure optimization as a key component of therapeutic antibody engineering. ([Taylor & Francis Online][1])
+* Studies combining AI and physics-based modeling demonstrate improved antibody design productivity using integrated computational pipelines. ([PMC][2])
+
+---
+
+# Pipeline 16 — Hybrid Sequence-Structure Exploration Pipeline
+
+**Sequence Prompt → Diffusion Structure Generator → ProteinMPNN → Structural Validation**
+
+## Scientific motivation
+
+Hybrid pipelines combine **sequence-based generative models and structure-based generative models**.
+
+Sequence models (such as antibody language models) are excellent at exploring sequence space, while structural generative models (such as diffusion networks) excel at generating physically plausible protein geometries.
+
+Combining both approaches allows the pipeline to incorporate **human expertise or known motifs** while still exploring novel structural solutions.
+
+---
+
+## Step 1 — Sequence prompts or motif specification
+
+The pipeline begins with a sequence prompt that specifies certain residues or motifs. For example, researchers may want to preserve known antigen-binding residues or framework regions.
+
+This prompt constrains the search space and provides biological context for the generative model.
+
+---
+
+## Step 2 — Diffusion-based structure generation
+
+Diffusion models such as RFdiffusion generate candidate antibody structures consistent with the provided sequence constraints.
+
+These models operate by gradually denoising random protein structures until they converge to plausible conformations. ([Baker Lab][3])
+
+Because diffusion models learn distributions of protein structures, they can generate entirely new antibody geometries not present in the training dataset.
+
+---
+
+## Step 3 — Sequence design
+
+Once the structure is generated, inverse folding algorithms assign sequences that stabilize the backbone.
+
+ProteinMPNN is commonly used for this task because it efficiently predicts sequences compatible with a given structure.
+
+---
+
+## Step 4 — Structural validation
+
+Structure prediction models evaluate whether the generated sequence folds into the intended structure.
+
+---
+
+## Scientific implications
+
+Hybrid pipelines integrate **human knowledge and generative AI**.
+
+Researchers can guide the design process using biological constraints while still allowing AI models to explore novel solutions.
+
+---
+
+## References
+
+* Diffusion models for protein design have emerged as a powerful approach for generating novel protein structures. ([ScienceDirect][4])
+* RFdiffusion enables generation of protein backbones conditioned on target structures or motifs. ([Baker Lab][3])
+
+---
+
+# Pipeline 17 — Fully Automated Antibody Discovery Pipeline
+
+**Antigen Input → Generative Design → Structural Prediction → Binding Evaluation → Developability Screening**
+
+## Scientific motivation
+
+Pipeline 17 represents the **long-term goal of computational antibody engineering**: a fully automated pipeline that begins with an antigen target and outputs therapeutic antibody candidates.
+
+Traditional antibody discovery relies heavily on experimental screening methods such as immunization or phage display.
+
+AI-driven pipelines attempt to replace these methods with **computational exploration of antibody sequence space**.
+
+---
+
+## Step 1 — antigen structure input
+
+The pipeline begins with the structure of the target antigen or epitope.
+
+Modern structure prediction tools such as AlphaFold make it possible to obtain structural models for many proteins even without experimental data.
+
+---
+
+## Step 2 — generative antibody design
+
+Generative models produce candidate antibody sequences or structures that interact with the antigen surface.
+
+Diffusion-based models can generate antibody structures directly conditioned on antigen geometry.
+
+These models have demonstrated the ability to design antibodies that bind specific epitopes with atomic-level precision. ([Nature][5])
+
+---
+
+## Step 3 — structural prediction
+
+Candidate antibodies are evaluated using structure prediction models to confirm that they fold correctly.
+
+---
+
+## Step 4 — binding evaluation
+
+Docking simulations or complex prediction models estimate antibody-antigen binding interactions.
+
+---
+
+## Step 5 — developability filtering
+
+Finally, candidate antibodies are evaluated for stability, solubility, and immunogenicity.
+
+---
+
+## Scientific implications
+
+Fully automated pipelines could dramatically accelerate therapeutic antibody discovery by reducing reliance on laboratory screening.
+
+AI-driven antibody design has already produced antibodies targeting specific epitopes with experimentally confirmed binding structures. ([PMC][6])
 
 ---
 
 # Pipeline 18 — Active Learning Antibody Design
 
-**Workflow**
+**Generative Model → Experimental Testing → Model Retraining**
 
-Design → Experimental testing → Retraining
+## Scientific motivation
 
-AI models generate candidates, experiments evaluate them, and results retrain the models.
+Machine learning models improve when they receive feedback.
 
----
+Active learning pipelines integrate **computational predictions with experimental results**, allowing models to iteratively improve their designs.
 
-# Pipeline 19 — Manufacturability Screening
-
-**Workflow**
-
-AntiBERTy → Developability ML models → BioPhi
-
-This step ensures antibodies are suitable for large-scale production.
+This approach mirrors **natural antibody evolution**, where B-cells mutate antibodies and selection pressure favors high-affinity variants.
 
 ---
 
-# Pipeline 20 — Automated Complex Modeling
+## Step 1 — initial computational design
 
-**Workflow**
-
-DiffAb → IgFold → Docking software
-
-This pipeline predicts antibody-antigen complexes directly.
+The pipeline generates candidate antibodies using generative models.
 
 ---
 
-# The Future of AI Antibody Discovery
+## Step 2 — experimental validation
 
-The pieces for computational antibody discovery now exist.
+Selected candidates are experimentally tested using techniques such as:
 
-Generative models can create antibody sequences.
+* yeast display
+* phage display
+* surface plasmon resonance
 
-Structure predictors can model folding.
+---
 
-Diffusion models can design binding interfaces.
+## Step 3 — model retraining
 
-Developability predictors filter viable drug candidates.
+Experimental data is fed back into the machine learning model.
 
-What remains is integration.
+This allows the model to learn which features correlate with successful binding.
 
-A fully automated antibody design platform could operate like this:
+---
 
-1. Input antigen structure
-2. Generate thousands of antibodies
-3. predict structures
-4. simulate binding
-5. filter developability
-6. iterate optimization
+## Scientific implications
 
-Such systems could reduce discovery timelines dramatically.
+Active learning bridges the gap between **in silico prediction and biological reality**.
 
-Recent work already demonstrates that AI-designed antibodies can bind targets with near-atomic precision when combined with experimental screening. ([PMC][3])
+It enables iterative refinement of antibody design models.
 
-The field is still young, but the trajectory is clear: antibody discovery is becoming increasingly computational.
+---
 
-The future therapeutic antibody may be discovered not in a wet lab first, but inside a neural network.
+# Pipeline 19 — Manufacturability Screening Pipeline
+
+**Sequence Dataset → Developability Prediction → Filtering**
+
+## Scientific motivation
+
+Even antibodies that bind targets strongly may fail during drug development due to manufacturing challenges.
+
+Manufacturability pipelines evaluate properties such as:
+
+* aggregation propensity
+* solubility
+* thermal stability
+* expression yield
+
+---
+
+## Step 1 — sequence analysis
+
+Machine learning models analyze antibody sequences to identify problematic features.
+
+---
+
+## Step 2 — biophysical property prediction
+
+Predictive models estimate properties such as aggregation propensity or solubility.
+
+---
+
+## Step 3 — filtering
+
+Sequences predicted to perform poorly are removed from the candidate pool.
+
+---
+
+## Scientific implications
+
+Manufacturability screening ensures that computationally designed antibodies can be produced at scale.
+
+---
+
+# Pipeline 20 — Automated Antibody-Antigen Complex Modeling
+
+**Antigen Structure → Antibody Generation → Complex Modeling**
+
+## Scientific motivation
+
+The final pipeline focuses on modeling the **entire antibody-antigen complex**.
+
+Understanding the full complex structure is essential for predicting binding affinity and specificity.
+
+---
+
+## Step 1 — antibody generation
+
+Generative models propose candidate antibody structures.
+
+---
+
+## Step 2 — complex modeling
+
+Docking algorithms or deep learning models predict the antibody-antigen complex structure.
+
+---
+
+## Step 3 — interaction analysis
+
+The pipeline evaluates interactions at the binding interface, including:
+
+* hydrogen bonding networks
+* electrostatic complementarity
+* hydrophobic interactions
+
+---
+
+## Scientific implications
+
+Complex modeling provides detailed insight into antibody-antigen recognition mechanisms.
+
+These insights guide further optimization and engineering.
+
+[1]: https://www.tandfonline.com/doi/full/10.1080/19420862.2025.2528902?utm_source=chatgpt.com "Artificial intelligence-driven computational methods for ..."
+[2]: https://pmc.ncbi.nlm.nih.gov/articles/PMC12164381/?utm_source=chatgpt.com "Computational design of therapeutic antibodies with improved ..."
+[3]: https://www.bakerlab.org/2023/07/11/diffusion-model-for-protein-design/?utm_source=chatgpt.com "RFdiffusion: A generative model for protein design"
+[4]: https://www.sciencedirect.com/science/article/pii/S2590098625000107?utm_source=chatgpt.com "Generative AI for drug discovery and protein design"
+[5]: https://www.nature.com/articles/s41586-025-09721-5?utm_source=chatgpt.com "Atomically accurate de novo design of antibodies with ..."
+[6]: https://pmc.ncbi.nlm.nih.gov/articles/PMC10983868/?utm_source=chatgpt.com "Atomically accurate de novo design of antibodies with ... - PMC"
